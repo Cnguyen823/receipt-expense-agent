@@ -89,3 +89,57 @@ roadmap.
 ### Next Steps
 - Step 2: prompt-engineer an LLM call that parses this raw OCR text
   into structured JSON (merchant, date, line items, totals)
+
+---
+
+## 2026-08-02
+
+### Summary
+Built `src/parse.py`, an LLM parsing step that turns Step 1's raw OCR
+text into structured JSON, using Claude tool use for guaranteed
+schema-shaped output.
+
+### What Was Done
+- Set up an Anthropic API key in `.env` (already gitignored from day
+  one for this purpose) and installed `anthropic` + `python-dotenv`
+- Built `src/parse.py`: defines a `record_receipt` tool schema
+  (merchant, date, line_items, subtotal, tax, total) and forces
+  Claude to respond via that tool (`tool_choice`) instead of parsing
+  free-form text out of a response
+- Moved standing instructions into a `system` prompt, separate from
+  the per-call OCR text in the user message, for a cleaner
+  separation between fixed behavior and variable input
+
+### Issues & Resolutions
+- **Merchant/date came back missing, some items had wrong/missing
+  data:** compared the parsed output against the actual raw OCR text
+  and confirmed most of this was correct behavior, not a parsing bug
+  — the info genuinely isn't present in the OCR text (see Step 1's
+  known noise). Real, fixable issues found this way: OCR noise words
+  leaking into item names (e.g. `"Joe of Maker's Mark"`), and the
+  model defaulting a missing quantity to `1` instead of leaving it
+  out. Both addressed via explicit system prompt instructions.
+- **`temperature` param rejected:** attempted to set `temperature=0`
+  for more consistent extraction, but this specific model
+  (`claude-sonnet-5`) has deprecated that parameter. Removed it.
+- **Inconsistent missing-value representation:** across runs, missing
+  prices showed up sometimes as `null`, sometimes omitted, and in one
+  run as `0` (misleading — implies "free," not "unknown"). Likely
+  normal response variance we can no longer damp with `temperature`.
+  Not yet fixed.
+
+### Future Considerations
+- Before tightening the parsing prompt further (e.g. explicitly
+  banning `0` as a stand-in for unknown), clean up OCR quality more
+  first — several of today's "errors" traced back to OCR data loss,
+  not the LLM. Better input may shrink how much defensive prompting
+  the parsing step even needs. Revisit prompt tightening after that.
+- The arithmetic cross-check idea from Step 1/2 discussions (does
+  sum of line items ~= subtotal, does subtotal + tax ~= total) is
+  still a good, cheap way to flag likely-wrong extractions
+  regardless of cause — not built yet, still a good candidate for a
+  future validation pass.
+
+### Next Steps
+- Improve OCR quality further, then revisit LLM parsing prompt
+  tightening with cleaner input to test against

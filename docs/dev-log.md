@@ -143,3 +143,66 @@ schema-shaped output.
 ### Next Steps
 - Improve OCR quality further, then revisit LLM parsing prompt
   tightening with cleaner input to test against
+
+---
+
+## 2026-08-03
+
+### Summary
+Improved OCR by cropping background out of the photo, evidence-tested
+several other preprocessing ideas, and tightened the parsing prompt
+based on what those tests revealed.
+
+### What We Tried
+
+- **Cropping background out (`crop_to_receipt`) — kept.** Original
+  plan was a closed 4-point contour + perspective warp (like a mobile
+  scanner app), but the photo's bottom edge runs off-frame, so a
+  closed contour could never form there. Switched to a bounding box
+  around all significant detected edges instead — falls back to the
+  image's own boundary when content runs off-frame, no special case
+  needed. Recovered real data we never had before (merchant name,
+  correct surcharge amount).
+- **Less/no blur — tried, not kept.** Recovered a bit more text, but
+  introduced confidently wrong numbers (e.g. a clean-looking but
+  incorrect `$14,000`) instead of obviously garbled ones. A wrong
+  answer that looks right is worse than one that looks uncertain, so
+  we kept the existing blur.
+- **Deskewing residual tilt — tried, not kept.** Verified the
+  correction direction visually before trusting it (same as our
+  original rotation fix), and it did straighten the image and
+  recover a previously-missing item in the raw OCR text. But checking
+  the full parsed JSON (not just raw text) showed a hallucination
+  ("Coca-Cola" instead of "Diet Cola") and a split/malformed item.
+  Raw text looked better; the real output got worse.
+- **CLAHE contrast enhancement — tried, not kept.** Expected to help
+  faint print stand out. Instead massively amplified fine noise —
+  the worst result of any test today, by a wide margin. Ruled out
+  without further tuning.
+- **Tesseract user-words (custom vocabulary) — tried, no effect.**
+  Loaded correctly but changed nothing. Makes sense in hindsight: it
+  only helps disambiguate near-miss word spelling, and our remaining
+  failures are mostly numeric or too garbled to be "near" any real
+  word.
+- **Parsing prompt tightening — kept.** Found two real issues by
+  comparing parsed JSON against raw OCR text: the model sometimes
+  substituted an unrelated labeled value into a field it couldn't
+  find (e.g. surcharge amount used as tax), and sometimes used
+  placeholder values (`0`, `"UNKNOWN"`) instead of omitting a field.
+  Both fixed via explicit system prompt instructions.
+
+### Future Considerations
+- Several tests today only revealed real regressions when checking
+  the *full parsed JSON*, not raw OCR text alone (deskew looked like
+  a win in raw text, was a net loss end-to-end). Keep evaluating
+  changes against full pipeline output going forward.
+- Likely near the ceiling of what preprocessing alone can do on this
+  one photo. Further real improvement probably needs a batch of
+  receipts to validate against (see Step 4), better source photos, or
+  a fundamentally different OCR approach (cloud OCR / vision-LLM,
+  already flagged in docs/decisions.md as the scale-up path).
+- `MIN_CONTOUR_AREA_RATIO` (0.001) is still an untested default, same
+  caveat as `blockSize`/`C` before it.
+
+### Next Steps
+- Step 3: persist parsed receipt JSON into SQLite via SQLAlchemy

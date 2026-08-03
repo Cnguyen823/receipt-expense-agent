@@ -19,8 +19,19 @@ SYSTEM_PROMPT = (
     "judgment to exclude that noise from extracted values (e.g. item "
     "names).\n\n"
     "If a field's value isn't actually present in the text or can't be "
-    "confidently determined, omit it rather than guessing a default (e.g. "
-    "don't assume a missing quantity is 1)."
+    "confidently determined, the field must be left out of your response "
+    "entirely -- do not include it with any kind of default or "
+    "placeholder value. This means: no assuming a missing quantity is 1, "
+    "no using 0 as a stand-in for an unknown price (0 means free, not "
+    "unknown), and no placeholder strings like \"UNKNOWN\" or \"N/A\". An "
+    "unknown field should be genuinely absent from the output, not "
+    "represented by any value at all.\n\n"
+    "Only populate subtotal, tax, and total from text that is actually "
+    "labeled as that specific field. Do not substitute a different "
+    "labeled amount into one of these fields just because the field "
+    "you're looking for isn't present (e.g. don't use a surcharge amount "
+    "as the tax, or a cash total as the credit card total, even if "
+    "they're the only nearby numbers available)."
 )
 
 # A tool schema, not meant to be actually executed -- we use it purely to

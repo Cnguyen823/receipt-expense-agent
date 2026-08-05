@@ -201,8 +201,85 @@ based on what those tests revealed.
   receipts to validate against (see Step 4), better source photos, or
   a fundamentally different OCR approach (cloud OCR / vision-LLM,
   already flagged in docs/decisions.md as the scale-up path).
-- `MIN_CONTOUR_AREA_RATIO` (0.001) is still an untested default, same
-  caveat as `blockSize`/`C` before it.
+- `MIN_CONTOUR_AREA_RATIO` (0.001) is still an untested default
 
 ### Next Steps
 - Step 3: persist parsed receipt JSON into SQLite via SQLAlchemy
+
+---
+
+## 2026-08-05
+
+### Summary
+Built Step 3 (SQLite storage), then added two more real receipt
+photos and used them to pressure-test Step 1's pipeline -- several
+things tuned against one photo turned out not to generalize, exactly
+as flagged as a risk back on 2026-07-31.
+
+### What Was Done
+- Installed SQLAlchemy. Built `src/storage.py`: `Receipt` and
+  `LineItem` ORM models (one-to-many via foreign key), `init_db()`,
+  and `save_receipt()` to persist parse.py's output.
+- `date` is stored as a real `Date` column (not a plain string) so
+  future date-range queries (Step 5) are possible, with a
+  `date_is_estimated` boolean alongside it -- when parse.py can't
+  extract a date, we fall back to today's date rather than leaving it
+  null, but flag it so a fallback date is never silently treated as
+  reliable as a real one.
+- Updated parse.py's schema to request dates in `YYYY-MM-DD` format
+  directly from Claude, instead of writing our own date-parsing logic
+  for whatever loose format the OCR text happened to contain.
+- Tested the full OCR -> parse -> store -> query pipeline
+  end-to-end successfully.
+- Added `receipt-02.jpg` and `receipt-03.jpg` (converted from HEIC,
+  same naming convention as receipt-01).
+
+### Issues & Resolutions
+- **Fixed rotation assumption failed:** `receipt-02`/`03` came in
+  already upright, unlike `receipt-01`. The hardcoded `-90` rotation
+  would have wrongly rotated correct photos. Replaced with a
+  geometric heuristic: crop first, then rotate only if the crop is
+  wider than tall (a correctly-oriented receipt is always a tall
+  strip). Re-tested Tesseract's OSD after cropping too, hoping
+  cropping would fix its earlier unreliability -- it didn't
+  (low-confidence wrong answer on receipt-01, low-confidence
+  coincidentally-right answer on receipt-03, no usable way to trust
+  either). Kept the simpler geometric heuristic instead.
+- **Crop threshold failed on a low-contrast background:**
+  `crop_to_receipt()` found zero significant contours on `receipt-02`
+  (light tablecloth background) and threw our own validation error.
+  Diagnosed via the raw edge map: text was detected fine, but there
+  was no single large boundary contour the way `receipt-01`'s dark
+  wood background produced, and no individual text-line contour was
+  big enough alone to pass the old threshold. Lowered
+  `MIN_CONTOUR_AREA_RATIO` (0.001 -> 0.00025), verified against both
+  photos this doesn't reintroduce background noise into receipt-01's
+  crop. Not perfect: receipt-02's crop still clips slightly at one
+  edge.
+- **`--psm 6` doesn't generalize either -- found, not fixed.**
+  `receipt-03` (Walgreens, different layout/fonts than receipt-01)
+  preprocessed into a genuinely clean, readable image, but `--psm 6`
+  dropped the entire header/total and only recovered footer text.
+  Tested psm 3/4/11 too -- none handled the whole receipt well.
+  Left unresolved for now rather than chasing a fourth per-image
+  tuning fix in one session.
+
+### Future Considerations
+- Real pattern across today: several things tuned against one photo
+  (rotation direction, crop threshold, PSM mode) didn't hold up
+  against different real photos. Confirms the plan from 2026-07-31 --
+  validate against a representative sample, not a sample of one.
+- Decided not to keep chasing the PSM issue for perfect automated
+  accuracy. Instead: build toward a lightweight review/correction UI
+  later (a real, deliberate strategy, not a fallback) -- accept good-
+  but-imperfect automated extraction and let a human quickly fix
+  what's wrong, rather than trying to perfect OCR against every
+  possible receipt layout. Only works if automation stays "mostly
+  right, specific known gaps" rather than "mostly wrong" -- true
+  today, worth re-checking if it stops being true.
+
+### Next Steps
+- Step 4: loop the full pipeline over the receipts folder
+- Longer term: a lightweight Streamlit UI for uploading + reviewing/
+  correcting parsed receipts (already anticipated in README's
+  original scope)

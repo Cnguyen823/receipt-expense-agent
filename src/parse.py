@@ -44,7 +44,13 @@ RECEIPT_TOOL = {
         "type": "object",
         "properties": {
             "merchant": {"type": "string", "description": "Business name"},
-            "date": {"type": "string", "description": "Date of purchase"},
+            "date": {
+                "type": "string",
+                "description": (
+                    "Date of purchase, normalized to YYYY-MM-DD format "
+                    "regardless of how it appears in the source text."
+                ),
+            },
             "line_items": {
                 "type": "array",
                 "items": {

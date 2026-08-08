@@ -1,3 +1,4 @@
+import hashlib
 from datetime import date as date_type
 
 from sqlalchemy import Date, Float, ForeignKey, String, create_engine
@@ -14,6 +15,12 @@ class Receipt(Base):
     __tablename__ = "receipts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # SHA-256 of the source image's bytes, not its filename -- lets us
+    # detect an already-processed receipt even if it's renamed or
+    # re-uploaded under a different name later (e.g. via a future UI).
+    # source_file is kept only for human-readable reference.
+    content_hash: Mapped[str] = mapped_column(String, unique=True)
+    source_file: Mapped[str] = mapped_column(String)
     merchant: Mapped[str | None] = mapped_column(String, nullable=True)
     # date_is_estimated distinguishes a real extracted date from a fallback
     # to today's date, so future date-range queries don't silently treat
@@ -22,7 +29,10 @@ class Receipt(Base):
     date_is_estimated: Mapped[bool] = mapped_column(default=False)
     subtotal: Mapped[float | None] = mapped_column(Float, nullable=True)
     tax: Mapped[float | None] = mapped_column(Float, nullable=True)
-    total: Mapped[float] = mapped_column(Float)
+    # Nullable: parse.py's schema requires this key be present in its
+    # response, but the value itself may be null when genuinely
+    # undeterminable from a badly OCR'd receipt. See docs/decisions.md.
+    total: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     line_items: Mapped[list["LineItem"]] = relationship(
         back_populates="receipt", cascade="all, delete-orphan"
@@ -51,10 +61,25 @@ def init_db():
     Base.metadata.create_all(engine)
 
 
+# Hashes a file's actual bytes (not its name), so the same image is
+# recognized as a duplicate even if it's renamed.
+def compute_file_hash(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+# Checks whether a receipt with this content hash has already been saved,
+# so the batch pipeline can skip it before paying for OCR/LLM calls again.
+def receipt_exists(content_hash):
+    with Session(engine) as session:
+        existing = session.query(Receipt).filter_by(content_hash=content_hash).first()
+        return existing is not None
+
+
 # Takes a parsed receipt dict (parse.py's output shape) and persists it as
 # a Receipt row with related LineItem rows. Falls back to today's date,
 # flagged via date_is_estimated, when parse.py couldn't extract one.
-def save_receipt(receipt_data):
+def save_receipt(receipt_data, source_file, content_hash):
     date_str = receipt_data.get("date")
     if date_str:
         parsed_date = date_type.fromisoformat(date_str)
@@ -64,6 +89,8 @@ def save_receipt(receipt_data):
         date_is_estimated = True
 
     receipt = Receipt(
+        content_hash=content_hash,
+        source_file=source_file,
         merchant=receipt_data.get("merchant"),
         date=parsed_date,
         date_is_estimated=date_is_estimated,

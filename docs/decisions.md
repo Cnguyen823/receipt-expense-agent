@@ -86,3 +86,29 @@ parsing/storage logic against imagined clean data.
 ### Tradeoffs
 Slower to reach an end-to-end demo, but each stage is validated
 against real data before the next is built on top of it.
+
+---
+
+## 5. Receipt File Storage (local disk now, S3 later)
+
+### Options Considered
+- Local filesystem (`data/receipts/`)
+- Cloud object storage (e.g. AWS S3)
+
+### Chosen
+Local filesystem for now
+
+### Reasoning
+There's no UI yet -- receipts are added manually by the developer.
+Local files are simplest and require no cloud credentials or cost
+for a single-user CLI tool at this stage.
+
+### Tradeoffs
+Won't work once there's a real upload UI: a database shouldn't store
+large binary image data directly, and a future UI needs files to live
+somewhere addressable independent of any one machine. S3 is the clear
+next step then -- it also pairs naturally with cloud OCR (e.g. AWS
+Textract can read directly from S3), so the two deferred decisions
+(cloud OCR, cloud file storage) would likely land together. Deferred
+until there's an actual UI that needs it, consistent with the rest of
+this project's MVP scope.

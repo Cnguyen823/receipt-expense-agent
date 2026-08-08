@@ -283,3 +283,61 @@ as flagged as a risk back on 2026-07-31.
 - Longer term: a lightweight Streamlit UI for uploading + reviewing/
   correcting parsed receipts (already anticipated in README's
   original scope)
+
+---
+
+## 2026-08-08
+
+### Summary
+Investigated the `--psm 6` generalization gap from last session
+(inconclusive, dropped), then built Step 4: batch processing with
+real deduplication, which surfaced and fixed a genuine schema design
+bug affecting both required fields.
+
+### What Was Done
+- Tested two hypotheses for why `--psm 6` drops receipt-03's header
+  entirely (OCR'd in isolation, OCR'd with the logo region excluded).
+  Both inconclusive/contradictory -- excluding the logo made results
+  *worse*, disproving the "logo confuses segmentation" theory. Left
+  as a documented, unresolved limitation rather than kept chasing it,
+  consistent with last session's decision to lean on a future
+  correction UI instead of perfecting every OCR edge case.
+- Built `src/batch.py`: loops OCR -> parse -> store over
+  `data/receipts/`, catching per-receipt failures so one bad photo
+  doesn't stop the batch.
+- Added real deduplication to `storage.py`: a `content_hash` (SHA-256
+  of the image's actual bytes) instead of filename, so a renamed or
+  re-uploaded duplicate is still caught later (e.g. once there's an
+  upload UI, where filenames won't be trustworthy). Checked before
+  running OCR/LLM, so a duplicate doesn't cost an API call.
+- Documented deferred file storage decision (local disk now, S3 once
+  there's a real UI) in docs/decisions.md.
+
+### Issues & Resolutions
+- **Batch run crashed on receipt-02:** Claude returned the literal
+  string `"<UNKNOWN>"` for `total`, a required numeric field --
+  crashed trying to save a string into a numeric column. Root cause
+  wasn't inconsistent model behavior: it was a genuine contradiction
+  in our own schema. `total` was required (key must be present) while
+  our prompt said never guess or use a placeholder for an unknown
+  value -- when the true total truly wasn't in the text (receipt-02's
+  OCR was badly degraded), the model had no way to satisfy both
+  instructions at once. Fixed by allowing `total`'s value to be
+  `null` (`"type": ["number", "null"]`) -- required key, honestly
+  nullable value -- and making the DB column nullable to match.
+- **Same bug found in `merchant` on the next run** -- returned the
+  string `"UNKNOWN"` instead of crashing (a string fits a string
+  column fine, so no crash, but same dishonest-placeholder problem).
+  Confirms the root cause generalizes: any required field where the
+  model may genuinely not know the answer needs this same fix.
+  `line_items` doesn't have this problem -- an empty array is already
+  an honest way to say "found nothing." Applied the same
+  required-key/nullable-value fix to `merchant`.
+
+### Future Considerations
+- Watch for this same pattern if new required fields get added later
+  -- required-but-possibly-unknowable fields need `null` allowed
+  explicitly, not just a "don't guess" prompt instruction.
+
+### Next Steps
+- Step 5: LangChain natural-language query agent over stored receipts

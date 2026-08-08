@@ -31,7 +31,11 @@ SYSTEM_PROMPT = (
     "labeled amount into one of these fields just because the field "
     "you're looking for isn't present (e.g. don't use a surcharge amount "
     "as the tax, or a cash total as the credit card total, even if "
-    "they're the only nearby numbers available)."
+    "they're the only nearby numbers available).\n\n"
+    "merchant and total are always required in your response, unlike "
+    "other fields. If you genuinely cannot determine either from the "
+    "text, set it to null -- never a placeholder string like \"UNKNOWN\", "
+    "and never a guessed value."
 )
 
 # A tool schema, not meant to be actually executed -- we use it purely to
@@ -43,7 +47,13 @@ RECEIPT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "merchant": {"type": "string", "description": "Business name"},
+            "merchant": {
+                "type": ["string", "null"],
+                "description": (
+                    "Business name. Required in your response, but the "
+                    "value itself may be null if genuinely undetermined."
+                ),
+            },
             "date": {
                 "type": "string",
                 "description": (
@@ -66,7 +76,13 @@ RECEIPT_TOOL = {
             },
             "subtotal": {"type": "number"},
             "tax": {"type": "number"},
-            "total": {"type": "number"},
+            "total": {
+                "type": ["number", "null"],
+                "description": (
+                    "Grand total charged. Required in your response, but "
+                    "the value itself may be null if genuinely undetermined."
+                ),
+            },
         },
         "required": ["merchant", "line_items", "total"],
     },

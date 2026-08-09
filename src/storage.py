@@ -22,6 +22,10 @@ class Receipt(Base):
     content_hash: Mapped[str] = mapped_column(String, unique=True)
     source_file: Mapped[str] = mapped_column(String)
     merchant: Mapped[str | None] = mapped_column(String, nullable=True)
+    # One of parse.py's CATEGORIES, or null if genuinely unclear. Left for
+    # a human to fill in later via a future correction UI rather than
+    # guessed. See docs/decisions.md.
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
     # date_is_estimated distinguishes a real extracted date from a fallback
     # to today's date, so future date-range queries don't silently treat
     # the two as equally reliable. See docs/decisions.md.
@@ -92,6 +96,7 @@ def save_receipt(receipt_data, source_file, content_hash):
         content_hash=content_hash,
         source_file=source_file,
         merchant=receipt_data.get("merchant"),
+        category=receipt_data.get("category"),
         date=parsed_date,
         date_is_estimated=date_is_estimated,
         subtotal=receipt_data.get("subtotal"),

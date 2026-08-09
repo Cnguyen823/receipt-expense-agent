@@ -10,6 +10,20 @@ load_dotenv()
 
 MODEL = "claude-sonnet-5"
 
+# Fixed list rather than free text, so category values stay consistent and
+# queryable later (Step 5) instead of e.g. "Food", "food", and "Dining" all
+# meaning the same thing but not matching each other.
+CATEGORIES = [
+    "Food & Dining",
+    "Groceries",
+    "Shopping",
+    "Health & Pharmacy",
+    "Entertainment",
+    "Travel",
+    "Utilities",
+    "Other",
+]
+
 # Persistent instructions for how to behave on every call, kept separate
 # from the actual per-call OCR text passed in as the user message.
 SYSTEM_PROMPT = (
@@ -73,6 +87,15 @@ RECEIPT_TOOL = {
                     },
                     "required": ["name"],
                 },
+            },
+            "category": {
+                "type": "string",
+                "enum": CATEGORIES,
+                "description": (
+                    "Best-fit spending category based on merchant/items. "
+                    "Omit entirely if genuinely unclear which fits -- do "
+                    "not default to \"Other\" just because you're unsure."
+                ),
             },
             "subtotal": {"type": "number"},
             "tax": {"type": "number"},

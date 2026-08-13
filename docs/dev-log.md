@@ -2,407 +2,348 @@
 
 ## 2026-07-30
 
-### Summary
-Defined the project scope and got the local development environment
-ready for the OCR pipeline.
+Defined the project scope and got the dev environment set up for the
+OCR pipeline. Wrote README.md, docs/architecture.md, docs/decisions.md,
+docs/roadmap.md. Configured .gitignore for Python (.venv/, __pycache__/,
+.env, *.db/*.sqlite3, .DS_Store).
 
-### What Was Done
-- Wrote `README.md` with the project overview, goals, tech stack, and
-  MVP scope
-- Wrote `docs/architecture.md` describing the OCR -> LLM parsing ->
-  SQLite -> query agent system flow
-- Wrote `docs/decisions.md`, documenting key technical decisions
-  (OCR engine, storage, agent framework, build sequencing) with
-  options considered and tradeoffs
-- Wrote `docs/roadmap.md` with the phased build order
-- Configured `.gitignore` for Python (`.venv/`, `__pycache__/`,
-  `.env`, `*.db`/`*.sqlite3`, `.DS_Store`)
-- Installed the Tesseract OCR engine via Homebrew (`tesseract 5.5.3`)
-- Created a project virtual environment (`.venv`) — noted that
-  installing Tesseract's dependency chain via Homebrew silently
-  bumped the global `python3` from 3.13.7 to 3.14.6; not an issue
-  since the venv is self-consistent, but worth remembering as a
-  general Homebrew gotcha
-- Installed `pytesseract` and `Pillow` into the venv
-- Smoke-tested the install by calling `pytesseract.get_tesseract_version()`
-  end-to-end (Python -> pytesseract -> subprocess -> Tesseract binary
-  -> back to Python) to confirm the toolchain is wired up correctly
-  before writing any real OCR logic against it
+Installed Tesseract via Homebrew (5.5.3). Installing its dependency
+chain silently bumped global python3 from 3.13.7 to 3.14.6 -- not a
+problem since the venv is self-consistent, but a good reminder that
+Homebrew can do that. Created the venv, installed pytesseract +
+Pillow, smoke-tested with `pytesseract.get_tesseract_version()`
+end-to-end before writing any real OCR logic.
 
-### Next Steps
-- Step 1: get a real receipt image into the project and run the
-  first actual OCR pass with pytesseract, then inspect the raw text
-  output for quality/noise before designing the LLM parsing step
+Next: get a real receipt photo in and run the first actual OCR pass,
+inspect the raw text quality before designing the parsing step.
 
 ---
 
 ## 2026-07-31
 
-### Summary
-Got a real receipt photo into the project and built out `src/ocr.py`
-with a working OCR preprocessing pipeline, completing Step 1 of the
-roadmap.
+Got a real receipt photo in (receipt-01.jpg, converted from HEIC via
+sips) and built src/ocr.py. Took a few rounds to get right.
 
-### What Was Done
-- Added a real receipt photo (`data/receipts/receipt-01.jpg`),
-  converted from HEIC to JPEG via macOS `sips`
-- Built `src/ocr.py` with an `extract_text()` function, iterated
-  through several rounds of preprocessing based on real OCR output
+Raw OCR on the unprocessed photo was total garbage. Looked at the
+image directly instead of guessing -- it was physically sideways.
+Fixed with a manual 90-degree rotation. Tried Tesseract's OSD
+(automatic orientation detection) instead of hardcoding the angle,
+but it gave low-confidence wrong answers -- the receipt only fills
+part of the frame and the wood-grain clipboard background was enough
+noise to throw it off. Went back to the fixed rotation.
 
-### Issues & Resolutions
-- **Rotation:** raw OCR on the unprocessed photo produced total
-  garbage. Diagnosed by visually inspecting the image (not guessed):
-  the photo was physically sideways. Fixed with a manual 90-degree
-  rotation.
-- **OSD unreliable:** tried Tesseract's automatic orientation
-  detection (OSD) instead of a hardcoded rotation, but it failed/gave
-  low-confidence wrong answers on this photo — the receipt only fills
-  part of the frame, and the wood-grain clipboard background was
-  enough noise to defeat it. Fell back to the fixed manual rotation.
-- **Missing item table:** after fixing rotation, the item/qty/price
-  table was still dropped entirely. Diagnosed as a page-segmentation
-  issue — Tesseract's default mode assumes paragraph text, not a
-  columnar table. Tested several `--psm` modes; `--psm 6` (uniform
-  block of text) was the only one that recovered table content.
-- **Remaining noise:** text was still noisy throughout. Added
-  grayscale + adaptive thresholding (binarizing to clean black/white,
-  computed locally so uneven lighting doesn't get misread) using
-  OpenCV. A light Gaussian blur was added before thresholding to
-  smooth fine background noise that would otherwise survive as
-  speckle and get misread as text. Blur kernel size was tuned
-  empirically (3x3 vs 5x5) against real OCR output — 5x5 removed more
-  noise but also eroded real character strokes and lost item rows, so
-  3x3 was chosen as the better balance.
+After fixing rotation, the item/price table still wasn't showing up
+at all. Turned out to be a page-segmentation issue -- Tesseract's
+default mode assumes normal paragraph text, not a column layout.
+`--psm 6` (treat it as one uniform block) was the only mode that
+recovered the table.
 
-### Future Considerations
-- Rotation angle, blur kernel size, and adaptive threshold params
-  were all tuned against a single real receipt (one lighting
-  condition, one camera, one paper type) — not guaranteed to
-  generalize. Revisit once Step 4 (batch processing) provides a
-  representative sample of real receipts to validate against, rather
-  than auto-tuning now off a sample size of one.
-- Cropping the receipt out of the background before OCR would likely
-  improve both OSD reliability and general OCR quality, but requires
-  real boundary-detection logic — bigger scope than Step 1, revisit
-  later if noise remains a problem at batch scale.
+Text was still noisy after that. Added grayscale + adaptive
+thresholding (local, not global, so uneven lighting doesn't get
+misread as text) plus a light blur beforehand to smooth background
+noise without eroding character strokes. Tested 3x3 vs 5x5 blur --
+5x5 killed more noise but also ate real character strokes and lost
+item rows, so went with 3x3.
 
-### Next Steps
-- Step 2: prompt-engineer an LLM call that parses this raw OCR text
-  into structured JSON (merchant, date, line items, totals)
+Worth remembering: rotation angle, blur size, threshold params were
+all tuned against exactly one photo (one lighting setup, one camera,
+one paper type) -- no guarantee this generalizes. Revisit once I've
+got a batch of receipts to check against. Cropping the receipt out of
+the background before OCR would probably help both OSD and general
+quality, but that's real boundary-detection work, bigger than Step 1
+-- later if noise is still a problem at batch scale.
+
+Next: Step 2, prompt-engineer an LLM call that turns this raw OCR
+text into structured JSON.
 
 ---
 
 ## 2026-08-02
 
-### Summary
-Built `src/parse.py`, an LLM parsing step that turns Step 1's raw OCR
-text into structured JSON, using Claude tool use for guaranteed
-schema-shaped output.
+Built src/parse.py -- takes Step 1's raw OCR text and turns it into
+structured JSON via Claude tool use, so the output shape is
+guaranteed instead of parsing free text myself.
 
-### What Was Done
-- Set up an Anthropic API key in `.env` (already gitignored from day
-  one for this purpose) and installed `anthropic` + `python-dotenv`
-- Built `src/parse.py`: defines a `record_receipt` tool schema
-  (merchant, date, line_items, subtotal, tax, total) and forces
-  Claude to respond via that tool (`tool_choice`) instead of parsing
-  free-form text out of a response
-- Moved standing instructions into a `system` prompt, separate from
-  the per-call OCR text in the user message, for a cleaner
-  separation between fixed behavior and variable input
+Set up an Anthropic API key in .env (already gitignored from day one
+for exactly this). Installed anthropic + python-dotenv. Defined a
+record_receipt tool schema and forced Claude to respond through it.
+Split instructions into a system prompt, separate from the actual
+per-call OCR text -- keeps fixed behavior and variable input apart.
 
-### Issues & Resolutions
-- **Merchant/date came back missing, some items had wrong/missing
-  data:** compared the parsed output against the actual raw OCR text
-  and confirmed most of this was correct behavior, not a parsing bug
-  — the info genuinely isn't present in the OCR text (see Step 1's
-  known noise). Real, fixable issues found this way: OCR noise words
-  leaking into item names (e.g. `"Joe of Maker's Mark"`), and the
-  model defaulting a missing quantity to `1` instead of leaving it
-  out. Both addressed via explicit system prompt instructions.
-- **`temperature` param rejected:** attempted to set `temperature=0`
-  for more consistent extraction, but this specific model
-  (`claude-sonnet-5`) has deprecated that parameter. Removed it.
-- **Inconsistent missing-value representation:** across runs, missing
-  prices showed up sometimes as `null`, sometimes omitted, and in one
-  run as `0` (misleading — implies "free," not "unknown"). Likely
-  normal response variance we can no longer damp with `temperature`.
-  Not yet fixed.
+Merchant/date came back missing on the first runs, some items had
+wrong or missing data. Checked the parsed output against the raw OCR
+text and most of it turned out to be correct behavior -- the info
+genuinely isn't in the text, matches Step 1's known noise. Two real
+bugs found this way though: OCR noise words leaking into item names
+("Joe of Maker's Mark"), and the model defaulting a missing quantity
+to 1 instead of leaving it out. Fixed both with explicit prompt
+instructions.
 
-### Future Considerations
-- Before tightening the parsing prompt further (e.g. explicitly
-  banning `0` as a stand-in for unknown), clean up OCR quality more
-  first — several of today's "errors" traced back to OCR data loss,
-  not the LLM. Better input may shrink how much defensive prompting
-  the parsing step even needs. Revisit prompt tightening after that.
-- The arithmetic cross-check idea from Step 1/2 discussions (does
-  sum of line items ~= subtotal, does subtotal + tax ~= total) is
-  still a good, cheap way to flag likely-wrong extractions
-  regardless of cause — not built yet, still a good candidate for a
-  future validation pass.
+Tried setting temperature=0 for more consistent output -- turns out
+this model has that param deprecated. Dropped it.
 
-### Next Steps
-- Improve OCR quality further, then revisit LLM parsing prompt
-  tightening with cleaner input to test against
+Missing prices are showing up inconsistently -- sometimes null,
+sometimes just omitted, once as 0 (bad, implies "free" not
+"unknown"). Probably normal response variance I can't damp with
+temperature anymore. Not fixed yet.
+
+Idea for later: an arithmetic cross-check (does sum of line items ~=
+subtotal, subtotal + tax ~= total) would be a cheap way to flag
+likely-wrong extractions regardless of cause. Haven't built it.
+
+Next: clean up OCR more first, then come back and tighten the parsing
+prompt against cleaner input.
 
 ---
 
 ## 2026-08-03
 
-### Summary
-Improved OCR by cropping background out of the photo, evidence-tested
-several other preprocessing ideas, and tightened the parsing prompt
-based on what those tests revealed.
+Cropped the background out of the photo, tested a handful of other
+preprocessing ideas, tightened the parsing prompt based on what the
+tests showed.
 
-### What We Tried
+**Cropping (kept).** Original plan was a closed 4-point contour +
+perspective warp, like a phone scanner app. Didn't work -- the
+photo's bottom edge runs off-frame, so a closed contour never forms
+there. Switched to a bounding box around every significant detected
+edge instead, which naturally falls back to the image's own boundary
+when content runs off-frame. Recovered real data I never had before
+(merchant name, a correct surcharge amount).
 
-- **Cropping background out (`crop_to_receipt`) — kept.** Original
-  plan was a closed 4-point contour + perspective warp (like a mobile
-  scanner app), but the photo's bottom edge runs off-frame, so a
-  closed contour could never form there. Switched to a bounding box
-  around all significant detected edges instead — falls back to the
-  image's own boundary when content runs off-frame, no special case
-  needed. Recovered real data we never had before (merchant name,
-  correct surcharge amount).
-- **Less/no blur — tried, not kept.** Recovered a bit more text, but
-  introduced confidently wrong numbers (e.g. a clean-looking but
-  incorrect `$14,000`) instead of obviously garbled ones. A wrong
-  answer that looks right is worse than one that looks uncertain, so
-  we kept the existing blur.
-- **Deskewing residual tilt — tried, not kept.** Verified the
-  correction direction visually before trusting it (same as our
-  original rotation fix), and it did straighten the image and
-  recover a previously-missing item in the raw OCR text. But checking
-  the full parsed JSON (not just raw text) showed a hallucination
-  ("Coca-Cola" instead of "Diet Cola") and a split/malformed item.
-  Raw text looked better; the real output got worse.
-- **CLAHE contrast enhancement — tried, not kept.** Expected to help
-  faint print stand out. Instead massively amplified fine noise —
-  the worst result of any test today, by a wide margin. Ruled out
-  without further tuning.
-- **Tesseract user-words (custom vocabulary) — tried, no effect.**
-  Loaded correctly but changed nothing. Makes sense in hindsight: it
-  only helps disambiguate near-miss word spelling, and our remaining
-  failures are mostly numeric or too garbled to be "near" any real
-  word.
-- **Parsing prompt tightening — kept.** Found two real issues by
-  comparing parsed JSON against raw OCR text: the model sometimes
-  substituted an unrelated labeled value into a field it couldn't
-  find (e.g. surcharge amount used as tax), and sometimes used
-  placeholder values (`0`, `"UNKNOWN"`) instead of omitting a field.
-  Both fixed via explicit system prompt instructions.
+**Less/no blur (tried, didn't keep).** Got a bit more text back, but
+also introduced confidently wrong numbers -- a clean-looking but
+wrong $14,000 instead of an obviously garbled one. A wrong answer
+that looks right is worse than one that looks uncertain, so kept the
+blur as-is.
 
-### Future Considerations
-- Several tests today only revealed real regressions when checking
-  the *full parsed JSON*, not raw OCR text alone (deskew looked like
-  a win in raw text, was a net loss end-to-end). Keep evaluating
-  changes against full pipeline output going forward.
-- Likely near the ceiling of what preprocessing alone can do on this
-  one photo. Further real improvement probably needs a batch of
-  receipts to validate against (see Step 4), better source photos, or
-  a fundamentally different OCR approach (cloud OCR / vision-LLM,
-  already flagged in docs/decisions.md as the scale-up path).
-- `MIN_CONTOUR_AREA_RATIO` (0.001) is still an untested default
+**Deskew (tried, didn't keep).** Checked the correction direction
+visually before trusting it, same as the rotation fix. Straightened
+the image fine and pulled in a previously-missing item in the raw
+text. But the actual parsed JSON got worse -- a hallucinated
+"Coca-Cola" instead of "Diet Cola," a split/malformed item. Raw text
+looked better, real output didn't.
 
-### Next Steps
-- Step 3: persist parsed receipt JSON into SQLite via SQLAlchemy
+**CLAHE contrast (tried, didn't keep).** Wanted to help faint print
+stand out. Instead massively amplified noise -- worst result of the
+day by a wide margin. Ruled out without bothering to tune it further.
+
+**Tesseract user-words / custom vocabulary (tried, no effect.)**
+Loaded fine, changed nothing. Makes sense in hindsight -- it only
+helps with near-miss word spelling, and what's still failing is
+mostly numeric or too garbled to be "near" any real word.
+
+**Parsing prompt tightening (kept).** Compared parsed JSON against
+raw OCR text and found two real bugs: the model sometimes swapped in
+an unrelated labeled value when the field it wanted wasn't there
+(surcharge used as tax), and sometimes used placeholder values (0,
+"UNKNOWN") instead of just omitting the field. Fixed both with
+explicit prompt instructions.
+
+Takeaway: a few of today's "wins" only looked like wins in raw OCR
+text and turned out worse once I checked the actual parsed JSON.
+Need to keep checking full pipeline output, not just the OCR step in
+isolation. Also: probably near the ceiling of what preprocessing
+alone can do on this one photo -- next real improvement needs a
+batch of receipts to validate against, better source photos, or a
+different OCR approach entirely (cloud OCR / vision-LLM, already
+flagged in decisions.md as the scale-up path).
+MIN_CONTOUR_AREA_RATIO (0.001) is still an untested default.
+
+Next: Step 3, persist parsed JSON into SQLite via SQLAlchemy.
 
 ---
 
 ## 2026-08-05
 
-### Summary
 Built Step 3 (SQLite storage), then added two more real receipt
-photos and used them to pressure-test Step 1's pipeline -- several
-things tuned against one photo turned out not to generalize, exactly
-as flagged as a risk back on 2026-07-31.
+photos and used them to pressure-test Step 1 -- exactly the
+generalization risk flagged back on 7/31, now with real evidence.
 
-### What Was Done
-- Installed SQLAlchemy. Built `src/storage.py`: `Receipt` and
-  `LineItem` ORM models (one-to-many via foreign key), `init_db()`,
-  and `save_receipt()` to persist parse.py's output.
-- `date` is stored as a real `Date` column (not a plain string) so
-  future date-range queries (Step 5) are possible, with a
-  `date_is_estimated` boolean alongside it -- when parse.py can't
-  extract a date, we fall back to today's date rather than leaving it
-  null, but flag it so a fallback date is never silently treated as
-  reliable as a real one.
-- Updated parse.py's schema to request dates in `YYYY-MM-DD` format
-  directly from Claude, instead of writing our own date-parsing logic
-  for whatever loose format the OCR text happened to contain.
-- Tested the full OCR -> parse -> store -> query pipeline
-  end-to-end successfully.
-- Added `receipt-02.jpg` and `receipt-03.jpg` (converted from HEIC,
-  same naming convention as receipt-01).
+Installed SQLAlchemy. Built src/storage.py: Receipt and LineItem
+models (one-to-many via foreign key), init_db(), save_receipt(). date
+is a real Date column, not a string, so date-range queries are
+possible later, plus a date_is_estimated flag -- when parse.py can't
+find a date I fall back to today's date, but flag it so a fallback
+never gets silently treated as trustworthy as a real one. Updated
+parse.py to ask Claude for dates in YYYY-MM-DD directly rather than
+writing my own date-parsing logic. Full OCR -> parse -> store -> query
+pipeline tested end-to-end. Added receipt-02.jpg and receipt-03.jpg.
 
-### Issues & Resolutions
-- **Fixed rotation assumption failed:** `receipt-02`/`03` came in
-  already upright, unlike `receipt-01`. The hardcoded `-90` rotation
-  would have wrongly rotated correct photos. Replaced with a
-  geometric heuristic: crop first, then rotate only if the crop is
-  wider than tall (a correctly-oriented receipt is always a tall
-  strip). Re-tested Tesseract's OSD after cropping too, hoping
-  cropping would fix its earlier unreliability -- it didn't
-  (low-confidence wrong answer on receipt-01, low-confidence
-  coincidentally-right answer on receipt-03, no usable way to trust
-  either). Kept the simpler geometric heuristic instead.
-- **Crop threshold failed on a low-contrast background:**
-  `crop_to_receipt()` found zero significant contours on `receipt-02`
-  (light tablecloth background) and threw our own validation error.
-  Diagnosed via the raw edge map: text was detected fine, but there
-  was no single large boundary contour the way `receipt-01`'s dark
-  wood background produced, and no individual text-line contour was
-  big enough alone to pass the old threshold. Lowered
-  `MIN_CONTOUR_AREA_RATIO` (0.001 -> 0.00025), verified against both
-  photos this doesn't reintroduce background noise into receipt-01's
-  crop. Not perfect: receipt-02's crop still clips slightly at one
-  edge.
-- **`--psm 6` doesn't generalize either -- found, not fixed.**
-  `receipt-03` (Walgreens, different layout/fonts than receipt-01)
-  preprocessed into a genuinely clean, readable image, but `--psm 6`
-  dropped the entire header/total and only recovered footer text.
-  Tested psm 3/4/11 too -- none handled the whole receipt well.
-  Left unresolved for now rather than chasing a fourth per-image
-  tuning fix in one session.
+Rotation assumption broke immediately -- receipt-02/03 came in
+already upright, unlike receipt-01. The hardcoded -90 would've wrongly
+rotated correct photos. Replaced with a geometric rule instead: crop
+first, then only rotate if the crop comes out wider than tall (a
+right-side-up receipt is always a tall strip). Gave Tesseract's OSD
+another shot after cropping, hoping cropping would fix its earlier
+unreliability -- nope. Wrong answer, low confidence on receipt-01;
+right answer, still low confidence on receipt-03. No way to trust
+either outcome, so kept the simple geometric rule.
 
-### Future Considerations
-- Real pattern across today: several things tuned against one photo
-  (rotation direction, crop threshold, PSM mode) didn't hold up
-  against different real photos. Confirms the plan from 2026-07-31 --
-  validate against a representative sample, not a sample of one.
-- Decided not to keep chasing the PSM issue for perfect automated
-  accuracy. Instead: build toward a lightweight review/correction UI
-  later (a real, deliberate strategy, not a fallback) -- accept good-
-  but-imperfect automated extraction and let a human quickly fix
-  what's wrong, rather than trying to perfect OCR against every
-  possible receipt layout. Only works if automation stays "mostly
-  right, specific known gaps" rather than "mostly wrong" -- true
-  today, worth re-checking if it stops being true.
+Crop also broke outright on receipt-02's low-contrast background --
+zero significant contours found, hit my own validation error. Checked
+the raw edge map: text detected fine, but no single big boundary
+contour the way receipt-01's dark wood background gave me, and no
+individual text-line contour big enough alone to pass the threshold.
+Lowered MIN_CONTOUR_AREA_RATIO (0.001 -> 0.00025), checked it doesn't
+let background noise back into receipt-01's crop. Still not perfect
+-- receipt-02's crop clips slightly on one edge.
 
-### Next Steps
-- Step 4: loop the full pipeline over the receipts folder
-- Longer term: a lightweight Streamlit UI for uploading + reviewing/
-  correcting parsed receipts (already anticipated in README's
-  original scope)
+--psm 6 doesn't generalize either. receipt-03 (Walgreens, different
+layout/fonts) preprocessed into a genuinely clean image, but --psm 6
+dropped the whole header/total and only recovered the footer. Tried
+psm 3/4/11 too, none handled the whole receipt. Left it unresolved
+rather than chase a fourth tuning fix in one sitting.
+
+Real pattern today: several things tuned against one photo (rotation
+direction, crop threshold, PSM mode) didn't hold up against different
+real photos -- exactly why the plan was to validate against a real
+sample instead of one image. Also decided to stop chasing the PSM
+issue for perfect accuracy and instead build toward a lightweight
+correction UI later -- accept good-but-imperfect automation and fix
+what's wrong by hand, rather than trying to perfect OCR for every
+possible layout. Only works as long as automation stays "mostly
+right, known gaps" instead of "mostly wrong" -- worth rechecking if
+that stops being true.
+
+Next: Step 4, loop the pipeline over the receipts folder. Longer
+term: a lightweight Streamlit UI for uploading/reviewing/correcting
+receipts (already in README's original scope).
 
 ---
 
 ## 2026-08-08
 
-### Summary
-Investigated the `--psm 6` generalization gap from last session
-(inconclusive, dropped), then built Step 4: batch processing with
-real deduplication, which surfaced and fixed a genuine schema design
-bug affecting both required fields.
+Poked at the --psm 6 gap from last time (inconclusive, dropped it),
+then built Step 4: batch processing with real dedup, which turned up
+and fixed a real schema bug.
 
-### What Was Done
-- Tested two hypotheses for why `--psm 6` drops receipt-03's header
-  entirely (OCR'd in isolation, OCR'd with the logo region excluded).
-  Both inconclusive/contradictory -- excluding the logo made results
-  *worse*, disproving the "logo confuses segmentation" theory. Left
-  as a documented, unresolved limitation rather than kept chasing it,
-  consistent with last session's decision to lean on a future
-  correction UI instead of perfecting every OCR edge case.
-- Built `src/batch.py`: loops OCR -> parse -> store over
-  `data/receipts/`, catching per-receipt failures so one bad photo
-  doesn't stop the batch.
-- Added real deduplication to `storage.py`: a `content_hash` (SHA-256
-  of the image's actual bytes) instead of filename, so a renamed or
-  re-uploaded duplicate is still caught later (e.g. once there's an
-  upload UI, where filenames won't be trustworthy). Checked before
-  running OCR/LLM, so a duplicate doesn't cost an API call.
-- Documented deferred file storage decision (local disk now, S3 once
-  there's a real UI) in docs/decisions.md.
+Tested two theories for why --psm 6 drops receipt-03's header (OCR'd
+in isolation, OCR'd with the logo cropped out). Both inconclusive --
+excluding the logo actually made results worse, which kills the "logo
+confuses segmentation" theory. Left it as a known, unresolved
+limitation instead of continuing to chase it -- matches the decision
+from last session to lean on a correction UI instead of perfecting
+every OCR edge case.
 
-### Issues & Resolutions
-- **Batch run crashed on receipt-02:** Claude returned the literal
-  string `"<UNKNOWN>"` for `total`, a required numeric field --
-  crashed trying to save a string into a numeric column. Root cause
-  wasn't inconsistent model behavior: it was a genuine contradiction
-  in our own schema. `total` was required (key must be present) while
-  our prompt said never guess or use a placeholder for an unknown
-  value -- when the true total truly wasn't in the text (receipt-02's
-  OCR was badly degraded), the model had no way to satisfy both
-  instructions at once. Fixed by allowing `total`'s value to be
-  `null` (`"type": ["number", "null"]`) -- required key, honestly
-  nullable value -- and making the DB column nullable to match.
-- **Same bug found in `merchant` on the next run** -- returned the
-  string `"UNKNOWN"` instead of crashing (a string fits a string
-  column fine, so no crash, but same dishonest-placeholder problem).
-  Confirms the root cause generalizes: any required field where the
-  model may genuinely not know the answer needs this same fix.
-  `line_items` doesn't have this problem -- an empty array is already
-  an honest way to say "found nothing." Applied the same
-  required-key/nullable-value fix to `merchant`.
+Built src/batch.py -- loops OCR -> parse -> store over data/receipts/,
+catches per-receipt failures so one bad photo doesn't kill the whole
+batch. Added real dedup to storage.py: a content_hash (SHA-256 of the
+image bytes) instead of filename, so a renamed or re-uploaded
+duplicate still gets caught later, e.g. once there's an upload UI
+where filenames can't be trusted. Checked before running OCR/LLM so a
+duplicate doesn't cost an API call. Wrote up the deferred file-storage
+decision (local disk now, S3 once there's a real UI) in decisions.md.
 
-### Future Considerations
-- Watch for this same pattern if new required fields get added later
-  -- required-but-possibly-unknowable fields need `null` allowed
-  explicitly, not just a "don't guess" prompt instruction.
+Batch run crashed on receipt-02 -- Claude returned the literal string
+"<UNKNOWN>" for total, a required numeric field, and it crashed trying
+to save a string into a numeric column. Wasn't really inconsistent
+model behavior -- it was a real contradiction in my own schema. total
+was required (key has to be present) while the prompt said never
+guess or use a placeholder for something unknown. When the true total
+genuinely wasn't in the text (receipt-02's OCR was badly degraded),
+there was no way to satisfy both rules at once. Fixed by letting
+total's value be null ("type": ["number", "null"]) -- required key,
+honestly nullable value -- and making the DB column nullable to
+match.
 
-### Next Steps
-- Step 5: LangChain natural-language query agent over stored receipts
+Same bug showed up in merchant on the next run, just didn't crash
+this time (a string fits a string column fine) -- returned "UNKNOWN"
+instead. Confirms it's a general pattern: any required field where
+the model might genuinely not know the answer needs the same fix.
+line_items doesn't have this problem -- an empty array already means
+"found nothing" honestly. Applied the same fix to merchant.
+
+Worth remembering for any new required fields added later --
+required-but-possibly-unknowable fields need null explicitly allowed,
+not just a "don't guess" instruction.
+
+Next: Step 5, LangChain query agent over stored receipts.
 
 ---
 
 ## 2026-08-13
 
-### Summary
-Built Step 5: the LangChain query agent, completing the roadmap's
-core end-to-end pipeline (receipt photo in, natural-language answer
-out).
+Built Step 5 -- the LangChain query agent. Roadmap's core pipeline is
+now complete end-to-end: photo in, natural-language answer out.
 
-### What Was Done
-- Added a `category` field (fixed list, not free text, so values stay
-  consistent/queryable) to parse.py's schema and storage.py's
-  Receipt model -- needed for the roadmap's own example question
-  ("how much did I spend on food"). Left null when genuinely unclear
-  rather than guessed, same pattern as every other field. Reprocessed
-  all 3 receipts via batch.py to backfill it.
-- Installed `langchain`, `langchain-anthropic`, `langgraph`, the
-  first LangChain code in this project -- Step 2 deliberately used
-  the raw Anthropic SDK instead, per the original tech stack split.
-- Built `src/agent.py`: two hand-built tools (`sum_spending()`,
-  `lookup_receipts()`, both filterable by merchant/category/date
-  range) rather than LangChain's SQL Agent Toolkit -- chosen to keep
-  the "small action space" from README's own design, and because we
-  write the actual SQL ourselves rather than trusting the LLM to
-  generate correct queries live (consistent with this project's
-  whole approach to not trusting ungrounded LLM output).
-- Used `langchain.agents.create_agent` (the current API) over
-  `langgraph.prebuilt.create_react_agent` (same call, but flagged
-  deprecated at import time) -- checked the installed package's
-  actual signature rather than trust older tutorial-style code.
-- System prompt includes today's actual date (computed fresh, not
-  hardcoded) so the agent can resolve relative questions like "this
-  month" into real date ranges, plus the valid category list, plus
-  an explicit instruction to ask for clarification rather than guess.
+Added a category field (fixed list, not free text, so values stay
+consistent enough to actually query later) to parse.py's schema and
+storage.py's Receipt model -- needed this for the roadmap's own
+example question ("how much did I spend on food"). Left it null when
+genuinely unclear, same rule as everything else. Reprocessed all 3
+receipts via batch.py to backfill it.
 
-### Issues & Resolutions
-- **Thinking blocks broke plain-text output:** on a more complex
-  question, the agent's raw response included a giant base64
-  "thinking" block dumped straight into the output instead of clean
-  text. Same underlying concept as parse.py's tool_use block-list
-  handling from Step 2: message content isn't always a plain string,
-  it can be a list of typed blocks (thinking + text). Fixed `ask()`
-  to extract just the text blocks.
+Installed langchain, langchain-anthropic, langgraph -- first
+LangChain code in the project; Step 2 deliberately used the raw
+Anthropic SDK instead, per the original tech split. Built
+src/agent.py: two hand-built tools (sum_spending(), lookup_receipts(),
+both filterable by merchant/category/date) instead of LangChain's SQL
+Agent Toolkit. Wanted to keep the small action space from README's
+own design, and wanted to write the actual SQL myself rather than
+trust the LLM to generate correct queries live -- same "don't trust
+ungrounded LLM output" rule I've been holding to everywhere else in
+this project.
 
-### Verified Behavior
-- Roadmap's flagship example question ("how much did I spend on food
-  this month?") answered correctly end-to-end.
-- Asked about a merchant not in the data (Pandora, whose OCR was too
-  degraded to extract a merchant name) -- correctly reported no
-  match and asked a sensible clarifying question instead of guessing.
-- Asked an ambiguous question ("Amazon subscriptions") -- correctly
-  asked for clarification rather than assuming what was meant.
-- Asked to list this month's receipts -- correctly and honestly
-  reported which receipts have missing merchant/category/total data,
-  rather than hiding or fabricating it. This is last session's schema
-  design (honest nulls throughout) paying off directly at the query
-  layer.
+Used langchain.agents.create_agent (the current API) instead of
+langgraph.prebuilt.create_react_agent -- same call, but it's flagged
+deprecated at import time. Checked the installed package's actual
+signature instead of copying older tutorial code. System prompt
+carries today's real date (computed fresh, not hardcoded) so the
+agent can resolve stuff like "this month" into real date ranges, plus
+the category list, plus an instruction to ask for clarification
+instead of guessing.
 
-### Next Steps
-- Roadmap's core pipeline is now complete end-to-end (image -> OCR ->
-  parse -> store -> natural-language query). Remaining ideas, not
-  formal roadmap steps: a correction UI (Streamlit), revisiting the
-  `--psm 6` generalization gap with more real photos, cloud OCR/S3
-  if this ever needs to scale beyond personal use.
+On a more complex question, the agent's raw response dumped a giant
+base64 "thinking" block straight into the output instead of clean
+text. Same underlying thing as parse.py's tool_use handling from Step
+2 -- message content isn't always a plain string, can be a list of
+typed blocks (thinking + text). Fixed ask() to pull out just the text
+blocks.
+
+Remaining ideas, not formal roadmap steps: a correction UI
+(Streamlit), revisiting the --psm 6 gap with more real photos, cloud
+OCR/S3 if this ever needs to scale past personal use.
+
+---
+
+## 2026-08-13 (part 2)
+
+Built app.py -- a Streamlit UI over the whole pipeline: upload,
+review/correct, browse, chat.
+
+Mapped out what a real production version would need first --
+multi-tenant auth with non-negotiable user-scoped queries, S3, managed
+OCR, Postgres, async job processing + state tracking, migrations,
+tests, observability, secrets management. Good to know, but way more
+operational surface than a tool with one user needs. Streamlit reuses
+the pipeline exactly as-is, no API layer, gets to something usable
+today instead of mid-build. Also decided not to host this publicly
+open to anyone, at least not yet -- public + unauthenticated +
+LLM-backed means anyone with the link can burn through real API
+budget with no ceiling, and I'd want a hard usage cap in place before
+ever doing that. Nothing deployed right now. SQLite/local files stay
+as they are too -- only reason to swap to hosted Postgres/S3 would be
+needing durable storage on free hosting (Streamlit Community Cloud's
+free tier doesn't reliably keep local disk across restarts), and
+that's not a problem I have yet.
+
+Installed streamlit. app.py lives at the repo root and imports src/
+modules directly -- single Python process, no API needed. Upload page:
+file uploader -> hash-check against receipt_exists() before running
+OCR/LLM (same dedup as batch.py) -> extract + parse, cached in
+st.session_state keyed by content hash so Streamlit's rerun-the-whole-
+script-on-every-interaction model doesn't redo OCR/LLM on every
+keystroke -> editable review form -> save. Review form uses text
+inputs, not number inputs, for optional numeric fields, converting
+blank to None on save -- number_input can't represent "unknown," only
+a numeric default like 0.0, which would quietly turn "don't know the
+tax" into "tax is $0" and undo the honest-nulls thing I've been
+careful about since Step 2. Browse page is just a table of everything
+stored. Ask page is a chat interface wrapping agent.py's ask().
+
+Actually ran the app instead of just reading the code -- Streamlit
+locally plus a Playwright driver script, since chromium-cli wasn't
+available in this environment. Cleaned up the test data afterward so
+nothing fake ended up mixed in with my real receipts.
+
+Next: record a short demo video/GIF for the README.

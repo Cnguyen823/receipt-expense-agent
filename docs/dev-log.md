@@ -341,3 +341,68 @@ bug affecting both required fields.
 
 ### Next Steps
 - Step 5: LangChain natural-language query agent over stored receipts
+
+---
+
+## 2026-08-13
+
+### Summary
+Built Step 5: the LangChain query agent, completing the roadmap's
+core end-to-end pipeline (receipt photo in, natural-language answer
+out).
+
+### What Was Done
+- Added a `category` field (fixed list, not free text, so values stay
+  consistent/queryable) to parse.py's schema and storage.py's
+  Receipt model -- needed for the roadmap's own example question
+  ("how much did I spend on food"). Left null when genuinely unclear
+  rather than guessed, same pattern as every other field. Reprocessed
+  all 3 receipts via batch.py to backfill it.
+- Installed `langchain`, `langchain-anthropic`, `langgraph`, the
+  first LangChain code in this project -- Step 2 deliberately used
+  the raw Anthropic SDK instead, per the original tech stack split.
+- Built `src/agent.py`: two hand-built tools (`sum_spending()`,
+  `lookup_receipts()`, both filterable by merchant/category/date
+  range) rather than LangChain's SQL Agent Toolkit -- chosen to keep
+  the "small action space" from README's own design, and because we
+  write the actual SQL ourselves rather than trusting the LLM to
+  generate correct queries live (consistent with this project's
+  whole approach to not trusting ungrounded LLM output).
+- Used `langchain.agents.create_agent` (the current API) over
+  `langgraph.prebuilt.create_react_agent` (same call, but flagged
+  deprecated at import time) -- checked the installed package's
+  actual signature rather than trust older tutorial-style code.
+- System prompt includes today's actual date (computed fresh, not
+  hardcoded) so the agent can resolve relative questions like "this
+  month" into real date ranges, plus the valid category list, plus
+  an explicit instruction to ask for clarification rather than guess.
+
+### Issues & Resolutions
+- **Thinking blocks broke plain-text output:** on a more complex
+  question, the agent's raw response included a giant base64
+  "thinking" block dumped straight into the output instead of clean
+  text. Same underlying concept as parse.py's tool_use block-list
+  handling from Step 2: message content isn't always a plain string,
+  it can be a list of typed blocks (thinking + text). Fixed `ask()`
+  to extract just the text blocks.
+
+### Verified Behavior
+- Roadmap's flagship example question ("how much did I spend on food
+  this month?") answered correctly end-to-end.
+- Asked about a merchant not in the data (Pandora, whose OCR was too
+  degraded to extract a merchant name) -- correctly reported no
+  match and asked a sensible clarifying question instead of guessing.
+- Asked an ambiguous question ("Amazon subscriptions") -- correctly
+  asked for clarification rather than assuming what was meant.
+- Asked to list this month's receipts -- correctly and honestly
+  reported which receipts have missing merchant/category/total data,
+  rather than hiding or fabricating it. This is last session's schema
+  design (honest nulls throughout) paying off directly at the query
+  layer.
+
+### Next Steps
+- Roadmap's core pipeline is now complete end-to-end (image -> OCR ->
+  parse -> store -> natural-language query). Remaining ideas, not
+  formal roadmap steps: a correction UI (Streamlit), revisiting the
+  `--psm 6` generalization gap with more real photos, cloud OCR/S3
+  if this ever needs to scale beyond personal use.

@@ -1,10 +1,23 @@
 # Personal Receipt/Expense Agent
 
+![Demo: uploading a receipt, reviewing extracted data, and asking a spending question](docs/media/demo.gif)
+
 ## Overview
 Portfolio project for learning agentic AI skills, building on existing
 experience with document processing, OCR, and API development. Takes a
 receipt image, extracts structured data via OCR + LLM, stores it, and
 answers natural-language questions about spending.
+
+Full build story, including what was tried and rejected along the
+way, is in [docs/dev-log.md](docs/dev-log.md) and
+[docs/decisions.md](docs/decisions.md).
+
+## Try It
+```
+streamlit run app.py
+```
+Upload a receipt, review/correct the extracted fields, browse what's
+stored, and ask questions about your spending -- all in one local app.
 
 ## Goal
 Transition from a backend/Java software engineer role into an agentic
@@ -38,11 +51,12 @@ a real UI, RAG, multi-agent, scheduled/proactive behavior, retry
 logic, validation layers, error recovery.
 
 ## Current Status
-- [ ] Step 1: OCR on one real receipt image, inspect raw output
-- [ ] Step 2: LLM parsing of OCR text into structured JSON
-- [ ] Step 3: Store structured record in SQLite
-- [ ] Step 4: Loop over a folder of multiple receipts
-- [ ] Step 5: Build the query agent on top of stored data
+- [x] Step 1: OCR on one real receipt image, inspect raw output
+- [x] Step 2: LLM parsing of OCR text into structured JSON
+- [x] Step 3: Store structured record in SQLite
+- [x] Step 4: Loop over a folder of multiple receipts
+- [x] Step 5: Build the query agent on top of stored data
+- [x] Streamlit UI over the full pipeline
 
 See [docs/roadmap.md](docs/roadmap.md) for details and
 [docs/architecture.md](docs/architecture.md) for system design.
